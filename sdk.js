@@ -131,7 +131,7 @@
 						reject("SOL Pay SDK Fatal Error: Could not connect to Solana wallet!");
 					});
 				} else {
-					_this.sendRaw({type: "adapterInstall", adapter: _this.adapters.phantom});
+					_this.sendRaw({type: "adapterInstall", adapter: _this.adapters.PHANTOM});
 					reject("SOL Pay SDK Fatal Error: Solana wallet not found!");
 				}
 			});
@@ -155,7 +155,7 @@
 						reject("SOL Pay SDK Fatal Error: Could not connect to Solana wallet!");
 					});
 				} else {
-					_this.sendRaw({type: "adapterInstall", adapter: _this.adapters.solflare});
+					_this.sendRaw({type: "adapterInstall", adapter: _this.adapters.SOLFLARE});
 					reject("SOL Pay SDK Fatal Error: Solana wallet not found!");
 				}
 			});
@@ -181,7 +181,25 @@
 						reject("SOL Pay SDK Fatal Error: Could not connect to Solana wallet!");
 					});
 				} else {
-					_this.sendRaw({type: "adapterInstall", adapter: _this.adapters.slope});
+					_this.sendRaw({type: "adapterInstall", adapter: _this.adapters.SLOPE});
+					reject("SOL Pay SDK Fatal Error: Solana wallet not found!");
+				}
+			});
+		}
+
+		let connectWalletGlow = () => {
+			return new Promise(async (resolve, reject) => {
+				if("glowSolana" in window) {
+					window.glowSolana.connect().then((w) => {
+						window.glowSolana.on('disconnect', () => {
+							_this.sendRaw({type: "nullifyWallet"});
+						});
+						resolve({address: w.publicKey.toBase58()});
+					}).catch((err) => {
+						reject("SOL Pay SDK Fatal Error: Could not connect to Solana wallet!");
+					});
+				} else {
+					_this.sendRaw({type: "adapterInstall", adapter: _this.adapters.GLOW});
 					reject("SOL Pay SDK Fatal Error: Solana wallet not found!");
 				}
 			});
@@ -319,6 +337,56 @@
 							error(err, data.resolverToken);
 						})
 					}
+				} else if(data.type == "glow") {
+					if(data.command == "connect") {
+						connectWalletGlow().then((res) => {
+							send(res, data.resolverToken);
+						}).catch((err) => {
+							error(err, data.resolverToken);
+						})
+					} else if(data.command == "signTransaction") {
+						connectWalletGlow().then(() => {
+							let transaction = {
+								signatures: [],
+								serialize: () => {
+									return {
+										toString: () => {
+											return data.serialized
+										}
+									};
+								},
+								serializeMessage: () => {
+									return {
+										toString: () => {
+											return data.serializedMessage
+										}
+									};
+								},
+								addSignature: (pubkey, signature) => {
+									transaction.signatures.push(signature);
+								}
+							}
+							window.glowSolana.signTransaction(transaction).then(async (signedTransaction) => {
+								send({signature: signedTransaction.signatures[0]}, data.resolverToken);
+							}).catch((err) => {
+								error("SOL Pay SDK Fatal Error: Unable to sign transaction.", data.resolverToken);
+							})
+						}).catch((err) => {
+							error(err, data.resolverToken);
+						})
+					} else if(data.command == "signMessage") {
+						connectWalletGlow().then(() => {
+							window.glowSolana.signMessage(data.encodedMessage).then(async (signed) => {
+								send({
+									signature: signed.signature
+								}, data.resolverToken);
+							}).catch((err) => {
+								error("SOL Pay SDK Fatal Error: Unable to sign message.", data.resolverToken);
+							});
+						}).catch((err) => {
+							error(err, data.resolverToken);
+						})
+					}
 				}
 			} catch(err) {
 				return;
@@ -341,6 +409,8 @@
 							if(data.error == null) {
 								if(persistData.type == "connectWallet") {
 									adapter = persistData.adapter;
+									this.adapters.CURRENT_ADAPTER = adapter;
+									this.adapters.current_adapter = adapter;
 								} else if(persistData.type == "connectNetwork") {
 									network = persistData.network;
 									commitment = persistData.commitment;
@@ -389,7 +459,7 @@
 			});
 		}
 
-		this.connectWallet = (adapter = this.adapters.phantom) => {
+		this.connectWallet = (adapter = this.adapters.CURRENT_ADAPTER || this.adapters.PHANTOM) => {
 			return new Promise(async (resolve, reject) => {
 				resolve(await this.sendRaw({type: "connectWallet", adapter: adapter}).catch((err) => {
 					reject(err);
@@ -745,9 +815,11 @@
 			phantom: "PHANTOM",
 			solflare: "SOLFLARE",
 			slope: "SLOPE",
+			glow: "GLOW",
 			PHANTOM: "PHANTOM",
 			SOLFLARE: "SOLFLARE",
-			SLOPE: "SLOPE"
+			SLOPE: "SLOPE",
+			GLOW: "GLOW"
 		};
 
 		this.networks = {
